@@ -18,7 +18,7 @@ Does NOT test: live camera detection, real person crossing, face recognition acc
 Those require manual testing with a person physically in frame.
 
 Run:
-    .\.python\python.exe test_pipeline.py
+    python scripts/test_pipeline_offline.py
 """
 
 import sys, os, time, tempfile

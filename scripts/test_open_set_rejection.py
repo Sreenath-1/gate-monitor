@@ -21,9 +21,9 @@ This test uses the ACTUAL thresholds and absolute floors from config.py / .env,
 so it validates the real production configuration, not a toy setup.
 
 Run:
-    .\.python\python.exe test_open_set_rejection.py
+    python scripts/test_open_set_rejection.py
 
-This test MUST pass before any deployment. It runs alongside test_pipeline.py.
+This test MUST pass before any deployment. It runs alongside scripts/test_pipeline_offline.py.
 """
 
 import sys

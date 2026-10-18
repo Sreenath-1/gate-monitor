@@ -17,7 +17,7 @@ HARDENED (open-set fix):
     sign that the threshold is riding too close to the impostor distribution
 
 Usage:
-    .\.python\python.exe calibrate_thresholds.py
+    python tools/calibrate_thresholds.py
 
 No camera required — reads the known_faces/ gallery that is already on disk.
 

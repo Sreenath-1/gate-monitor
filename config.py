@@ -137,7 +137,7 @@ GATE_PERIOCULAR_VOTE_FLOOR = float(os.environ.get("GATE_PERIOCULAR_VOTE_FLOOR", 
 #                   0.40 gives generous margin above noise while rejecting strangers.
 #   Periocular 0.30: periocular embeddings are noisier; 0.30 is conservative.
 #   These MUST be validated against real held-out unknown-person footage before
-#   treating them as production-ready. See test_open_set_rejection.py.
+#   treating them as production-ready. See scripts/test_open_set_rejection.py.
 GATE_ABS_FLOOR_FULLFACE = float(os.environ.get("GATE_ABS_FLOOR_FULLFACE", "0.40"))
 GATE_ABS_FLOOR_PERIOCULAR = float(os.environ.get("GATE_ABS_FLOOR_PERIOCULAR", "0.35"))
 

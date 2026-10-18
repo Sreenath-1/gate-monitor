@@ -503,7 +503,7 @@ def main():
         print(f"\n✓  All 4 condition buckets populated. Gallery is complete.")
 
     print(f"\nDirectory: {out_dir}")
-    print("Run: .\.python\python.exe calibrate_thresholds.py  (to get suggested thresholds)")
+    print("Run: python tools/calibrate_thresholds.py  (to get suggested thresholds)")
     print("Then: .\.python\python.exe main.py --source rtsp")
 
 
