@@ -390,9 +390,9 @@ def test_identity_swap_splitting():
         tid2 = get_logical_track(5, "Alice", track_mapping, track_names, next_logical_tid_ref, logger, now)
         assert tid2 == 5  # No swap, should remain 5
         
-        # 3. SWAP! The track freezes, and Sivaraju gets attached to Track 5
-        tid3 = get_logical_track(5, "Sivaraju", track_mapping, track_names, next_logical_tid_ref, logger, now)
-        track_names[tid3] = "Sivaraju"
+        # 3. SWAP! The track freezes, and Bob gets attached to Track 5
+        tid3 = get_logical_track(5, "Bob", track_mapping, track_names, next_logical_tid_ref, logger, now)
+        track_names[tid3] = "Bob"
         
         assert tid3 == 1_000_000, f"Expected split ID 1000000, got {tid3}"
         assert track_mapping[5] == 1_000_000, "Mapping not updated"

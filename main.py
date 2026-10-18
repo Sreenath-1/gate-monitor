@@ -95,7 +95,7 @@ def get_logical_track(raw_tid, matched_name, track_mapping, track_names, next_lo
     
     if matched_name:
         old_name = track_names.get(logical_tid)
-        # Check for an identity swap (e.g., Alice -> Sivaraju)
+        # Check for an identity swap (e.g., Alice -> Bob)
         if old_name and not old_name.startswith("Person #") and old_name != matched_name:
             print(f"  [WARNING] Track ID {raw_tid} swapped identity from {old_name} to {matched_name}! Splitting session...")
             if event_logger:
