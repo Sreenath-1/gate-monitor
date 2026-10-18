@@ -1,0 +1,22 @@
+# MediaMTX minimal config for RTSP simulation
+# Only RTSP enabled, no authentication, localhost only.
+
+# Global
+logLevel: warn
+logDestinations: [stdout]
+
+# RTSP
+rtsp: true
+rtspAddress: :8554
+protocols: [tcp]
+
+# Disable everything else
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+
+# Paths — accept any publisher
+paths:
+  all:
+    source: publisher

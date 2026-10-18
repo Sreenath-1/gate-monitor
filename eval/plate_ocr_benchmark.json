@@ -1,0 +1,22 @@
+[
+  {
+    "component": "plate_detector",
+    "model": "yolo-v9-t-384-license-plate-end2end",
+    "load_time_s": 5.0,
+    "vram_delta_mb": 105,
+    "vram_peak_mb": 131,
+    "n_frames": 100,
+    "plates_found": 0,
+    "inference_ms": {
+      "mean": 20.0,
+      "median": 19.9,
+      "p95": 23.0,
+      "min": 16.8,
+      "max": 23.9
+    },
+    "fps": 50.3
+  },
+  {
+    "error": "OCR load failed: Unknown model cctv-s-v2-global-model. Use one of [cct-s-v2-global-model, cct-xs-v2-global-model, cct-s-v1-global-model, cct-xs-v1-global-model, argentinian-plates-cnn-model, argentinian-plates-cnn-synth-model, european-plates-mobile-vit-v2-model, global-plates-mobile-vit-v2-model, cct-s-relu-v1-global-model, cct-xs-relu-v1-global-model]"
+  }
+]

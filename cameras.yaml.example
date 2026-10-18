@@ -1,0 +1,56 @@
+# cameras.yaml — live camera configuration
+# Credentials stay in .env. Non-secret URLs can be written directly.
+
+cameras:
+
+  # ── Laptop webcam ───────────────────────────────────────────────
+  - camera_id: "laptop_cam"
+    name: "Laptop Webcam"
+    type: "webcam"
+    location_label: "Desk / Operator Station"
+    enabled: true
+    clock_offset_s: 0
+    detect_stream: 0
+    hires_stream: null
+
+  # ── CCTV Gate Camera ────────────────────────────────────────────
+  - camera_id: "cctv_gate"
+    name: "CCTV Gate Camera"
+    type: "rtsp"
+    location_label: "Main Gate Entry"
+    enabled: true
+    clock_offset_s: 0
+    detect_stream: "${CAMERA_CCTV_GATE_URL}"
+    hires_stream: null
+
+  # ── Phone Camera (Android IP Webcam) ────────────────────────────
+  - camera_id: "phone_cam"
+    name: "Phone Camera"
+    type: "http"
+    location_label: "Mobile / Roaming"
+    enabled: true
+    clock_offset_s: 0
+    detect_stream: "http://CAMERA_IP:8080/video"
+    hires_stream: null
+
+  # ── Phone Test (vehicle ANPR — RTSP phone stream) ────────────
+  # Set PHONE_RTSP_URL in .env (e.g. rtsp://CAMERA_IP:8554/live)
+  - camera_id: "phone_test"
+    name: "Phone Test Camera"
+    type: "rtsp"
+    location_label: "Gate / Test Position"
+    enabled: true
+    clock_offset_s: 0
+    detect_stream: "${PHONE_RTSP_URL}"
+    hires_stream: null
+
+  # ── Simulated RTSP (vehicle ANPR — looped clip via MediaMTX) ─
+  # Start with: tools\rtsp_sim\start_sim.bat data\clips\test.mp4
+  - camera_id: "sim_gate"
+    name: "Simulated Gate Stream"
+    type: "rtsp"
+    location_label: "Simulated / Dev"
+    enabled: false
+    clock_offset_s: 0
+    detect_stream: "rtsp://127.0.0.1:8554/sim"
+    hires_stream: null

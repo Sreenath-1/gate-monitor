@@ -1,0 +1,58 @@
+[
+  {
+    "model": "RF-DETR-Nano",
+    "source_resolution": "1920x1080",
+    "n_frames": 100,
+    "load_time_s": 4.1,
+    "vram_model_mb": 0.0,
+    "vram_peak_mb": 173.0,
+    "vram_current_mb": 126.0,
+    "rss_mb": 1988.0,
+    "inference_ms": {
+      "mean": 28.4,
+      "median": 25.5,
+      "p95": 43.0,
+      "p99": 46.7,
+      "min": 22.8,
+      "max": 46.7
+    },
+    "fps_sustained": 25.9,
+    "fps_theoretical": 39.2,
+    "vehicles_detected_total": 0,
+    "vehicles_per_frame_mean": 0.0,
+    "confidence_mean": 0,
+    "confidence_median": 0,
+    "gpu_temp_start_c": 48,
+    "gpu_temp_end_c": 52,
+    "gpu_temp_max_c": 52,
+    "throttled": false
+  },
+  {
+    "model": "RF-DETR-Small",
+    "source_resolution": "1920x1080",
+    "n_frames": 100,
+    "load_time_s": 4.3,
+    "vram_model_mb": 9.0,
+    "vram_peak_mb": 197.0,
+    "vram_current_mb": 133.0,
+    "rss_mb": 2028.0,
+    "inference_ms": {
+      "mean": 34.9,
+      "median": 30.3,
+      "p95": 52.7,
+      "p99": 74.1,
+      "min": 26.5,
+      "max": 77.5
+    },
+    "fps_sustained": 21.6,
+    "fps_theoretical": 33.0,
+    "vehicles_detected_total": 0,
+    "vehicles_per_frame_mean": 0.0,
+    "confidence_mean": 0,
+    "confidence_median": 0,
+    "gpu_temp_start_c": 50,
+    "gpu_temp_end_c": 55,
+    "gpu_temp_max_c": 56,
+    "throttled": false
+  }
+]
