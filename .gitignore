@@ -35,3 +35,10 @@ weights/
 .ruff_cache/
 .idea/
 .vscode/
+.freebuff/
+pyrightconfig.json
+.agents/
+.claude/
+.cursor/
+.windsurf/
+.aider*
