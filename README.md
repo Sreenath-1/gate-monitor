@@ -55,7 +55,7 @@ Standalone integration tests (need model weights or local data):
 
 ## Repository history
 
-Earlier history is not published, because it contained personal data (face enrollment images and attendance reports). This repository starts from a cleaned snapshot of the project: camera addresses and credentials were replaced by placeholders (set `RTSP_URL` in `.env`) and example person names in comments and tests were replaced by neutral names. Later work is reviewed through pull requests.
+Earlier history is not published. This repository starts from a cleaned snapshot of the project; camera addresses and credentials are placeholders (set `RTSP_URL` in `.env`). Later work is reviewed through pull requests.
 
 ## Development approach
 
@@ -63,4 +63,4 @@ Project direction, design and technical decisions: Sreenath-1. The implementatio
 
 ## Licensing
 
-All rights reserved pending agreement with the client. Third-party components keep their own licences; see `LICENSING.md`. Note: Ultralytics YOLO is AGPL-3.0 and InsightFace is non-commercial; both need a decision before any paid delivery.
+All rights reserved. Third-party components keep their own licences; see `LICENSING.md`. Ultralytics YOLO is AGPL-3.0 and InsightFace weights are non-commercial research only, so review both before any commercial use.

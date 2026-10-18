@@ -1,7 +1,7 @@
 {
   "system": {
     "python_version": "3.11.9",
-    "python_path": "C:\\cctv scan\\Video_Models\\gate_monitor\\.venv-gpu\\Scripts\\python.exe",
+    "python_path": ".venv-gpu\\Scripts\\python.exe",
     "platform": "Windows-10-10.0.26200-SP0",
     "cpu": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
     "ram_total_mb": 16072,

@@ -48,7 +48,7 @@
 | Resource | Budget | Rationale |
 |----------|--------|-----------|
 | **VRAM** | ≤ 4 GB | 6 GB total, ~2 GB for OS + display driver |
-| **System RAM** | ≤ 4 GB RSS | 16 GB shared with IDE, agent, browser |
+| **System RAM** | ≤ 4 GB RSS | 16 GB shared with IDE, tools, browser |
 | **Disk (data/)** | ≤ 80 GB | Refuse clip recording below 20 GB free |
 | **Sustained FPS** | ≥ 12 FPS | Measured after 30 min thermal soak |
 | **p95 event latency** | ≤ 2 s | From vehicle exit to plate emitted |

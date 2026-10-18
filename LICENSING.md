@@ -16,7 +16,7 @@
 
 ### Commercial Alternatives
 
-For commercial/police deployment, replace `InsightFaceEmbedder` in
+For commercial deployment, replace `InsightFaceEmbedder` in
 `face_embedder.py` with one of these commercially-licensed alternatives:
 
 | Provider | License | Notes |
@@ -26,8 +26,7 @@ For commercial/police deployment, replace `InsightFaceEmbedder` in
 | [AWS Rekognition](https://aws.amazon.com/rekognition/) | Commercial API | Cloud-based, per-call pricing |
 | [Azure Face API](https://azure.microsoft.com/en-us/products/ai-services/ai-vision) | Commercial API | Cloud-based |
 | [Luxand FaceSDK](https://luxand.com/) | Commercial SDK | On-premise, per-seat pricing |
-| [Cognitec FaceVACS](https://www.cognitec.com/) | Commercial SDK | Police-grade, NIST FRVT tested |
-| [NtechLab FindFace](https://ntechlab.com/) | Commercial SDK | Used by Russian law enforcement |
+| [Cognitec FaceVACS](https://www.cognitec.com/) | Commercial SDK | NIST FRVT tested |
 
 The `FaceEmbedder` interface in `face_embedder.py` is designed for easy
 swap — implement `detect_faces()`, `embed_face()`, `embed_periocular()`,
@@ -110,7 +109,7 @@ The following requirements apply:
 
 ### Recommendations for Deployment
 
-1. **Legal review**: Get explicit sign-off from the client's legal counsel
+1. **Legal review**: Get explicit sign-off from legal counsel
    before deploying face recognition in any production environment.
 
 2. **Signage**: Post visible notices that face recognition is in use.

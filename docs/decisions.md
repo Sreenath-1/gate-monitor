@@ -7,7 +7,7 @@ D4. Plates are detected on vehicle crops cut from the full-resolution frame, bec
 D5. The global fast-plate-ocr model is used first. Fine-tune on Indian plates only if measurement shows it is needed.
 D6. Character correction is positional only, capped at two edits, and always flagged. Unresolved reads go to a human, never forced valid.
 D7. Cross-frame voting must beat the best single frame in an ablation, because published work shows fusion can degrade results when tracks fragment.
-D8. Every clip carries a source label (phone, public, simulated, cctv). Client accuracy statements use cctv data only.
+D8. Every clip carries a source label (phone, public, simulated, cctv). Accuracy statements use cctv data only.
 D9. Testing follows a ladder: file replay, simulated RTSP, phone RTSP, then the real camera.
 D10. The development laptop is for development and pilot only; production hardware is sized from measured numbers.
 D11. Operator corrections feed a training export for OCR fine-tuning.
