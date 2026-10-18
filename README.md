@@ -17,6 +17,7 @@ Camera-based gate monitoring for RTSP CCTV. One codebase with several modes, sel
 - `zone.py`: virtual line crossing and direction.
 - `logger.py`, `config.py`: SQLite event logging with IST timestamps and CLI/config handling.
 - `tools/`: calibration, camera probing, benchmarks, evaluation and test-stream helpers.
+- `scripts/`: offline pipeline tests and open-set rejection tests (standalone, not run by pytest).
 
 ## Person features (attendance, search)
 
@@ -45,9 +46,12 @@ Windows, Python 3.11. Model weights, face data, databases, videos and credential
 
 Vehicle tests (need no camera or model weights):
 
-    python -m pytest tests/test_indian_plate.py tests/test_eval.py tests/test_event_store.py -q
+    python -m pytest tests/ -q
 
-Some other tests need model weights or local data that are not in the repository.
+Standalone integration tests (need model weights or local data):
+
+    python scripts/test_pipeline_offline.py
+    python scripts/test_open_set_rejection.py
 
 ## Repository history
 
