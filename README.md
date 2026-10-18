@@ -1,260 +1,62 @@
-# 🚪 Employee Gate Activity Monitor
+# Gate Monitor
 
-Tracks employee entry/exit through a CCTV-monitored gate.
-Works with **any video file** or **live RTSP camera stream**.
+Camera-based gate monitoring for RTSP CCTV. One codebase with several modes, selected with `main.py --mode <mode>`:
 
----
-
-## What It Does
-
-| Detection | Detail |
-|---|---|
-| **Exit detected** | Person crosses line going outward → logged with timestamp |
-| **Return detected** | Same person crosses back → duration calculated automatically |
-| **Duration tracking** | Live timer shown on each person while they're outside |
-| **Overstay alert** | Console + on-screen alert if outside beyond threshold (default: 30 min) |
-| **Face recognition** | InsightFace ArcFace identifies known employees (with mask-robust fallback) |
-| **CSV report** | Full activity log saved after every session |
-
----
-
-## Quick Start
-
-```bash
-# 1. Install
-pip install -r requirements.txt
-
-# 2. Run on your video
-python gate_monitor.py --source cctv.mp4
-
-# 3. Run on live RTSP camera
-python gate_monitor.py --source rtsp://USER:PASSWORD@CAMERA_IP:554/stream1
-```
-
-Output video saved as `gate_output.mp4`
-CSV report saved as `gate_report.csv`
-
----
-
-## Tech Stack
-
-| Component | Technology | Notes |
+| Mode | Purpose | Status |
 |---|---|---|
-| **Person Detection** | YOLO11n (Ultralytics) | 5.4MB nano model, ~1.8 FPS on CPU |
-| **Person Tracking** | ByteTrack | Built into Ultralytics |
-| **Face Recognition** | InsightFace buffalo_l (ArcFace) | 512-dim embeddings, ~99% frontal accuracy |
-| **Mask Fallback** | Periocular matching | Upper-face embeddings when mask detected |
-| **Inference** | CPU (ONNX Runtime) | No GPU required |
+| `attendance` | Detects and tracks people at a gate, identifies enrolled people by face, logs in/out events with IST timestamps | existing |
+| `search` | Web UI (FastAPI) to search stored person observations | paused |
+| `sources-check` | Checks that configured camera sources are reachable | existing |
+| `vehicles` | Detects vehicles, reads Indian number plates, stores events, serves a dashboard | development, Phase 1 |
 
----
+**Honest status:** the vehicle pipeline has unit tests and speed benchmarks on synthetic frames only. It has not been run on real camera footage and no accuracy has been measured. No camera is installed yet.
 
-## All Options
+## Shared building blocks
 
-```
---source       Video file path, RTSP URL, or webcam index (0)
---weights      YOLO weights (default: yolo11n.pt, auto-downloaded)
---line         Gate line position (0.0–1.0, default: 0.45)
-               0.0 = top of frame, 1.0 = bottom of frame
---overstay     Alert threshold in minutes (default: 30)
---flip         Flip entry/exit direction if camera is oriented differently
---direction    Gate line orientation: horizontal (default) or vertical
---output       Output video filename (default: gate_output.mp4)
---report       CSV report filename (default: gate_report.csv)
---no-show      Disable live preview window (runs faster)
---record       Enable video recording for live RTSP streams
---resize       Frame height for processing (default: 720, 0=no resize)
+- `camera_manager.py`, `stream.py`: multi-camera RTSP capture with reconnect and health monitoring, configured in `cameras.yaml` (an example is provided; real URLs come from environment variables).
+- `zone.py`: virtual line crossing and direction.
+- `logger.py`, `config.py`: SQLite event logging with IST timestamps and CLI/config handling.
+- `tools/`: calibration, camera probing, benchmarks, evaluation and test-stream helpers.
 
-Face Recognition:
---faces-dir    Path to known_faces/ directory (default: ./known_faces/)
---face-threshold  Match confidence threshold (default: 0.4 for ArcFace)
---face-every   Run face recognition every N frames (default: 15)
-```
+## Person features (attendance, search)
 
----
+Person detection with YOLO (Ultralytics) and BoT-SORT tracking, face identification with InsightFace, a FastAPI web UI on 127.0.0.1. Face enrollment data and attendance reports are personal data and are not in this repository (see `known_faces/README.md`).
 
-## Face Recognition Setup
+## Vehicle ANPR
 
-### Adding Known Faces
+Pipeline: RTSP capture, vehicle detection (RF-DETR Nano), tracking (ByteTrack), plate detection on vehicle crops (YOLOv9-t), plate OCR (fast-plate-ocr), Indian plate validation (standard, BH series, legacy formats, state codes, positional correction that is always flagged), cross-frame voting, SQLite event store, FastAPI dashboard with search, filters, CSV export and operator review.
 
-Place reference photos in the `known_faces/` directory:
+Modules: `vehicle_detector.py`, `vehicle_tracker.py`, `plate_reader.py`, `vehicle_pipeline.py`, `validators/indian_plate.py`, `event_store.py`, `dashboard.py`. Design decisions are in `docs/decisions.md`.
 
-```
-known_faces/
-    Alice/
-        photo1.jpg
-        photo2.jpg
-    OtherPerson/
-        photo1.jpg
-```
+Measured so far (synthetic 1920x1080 frames, RTX 4050 Laptop 6 GB): RF-DETR Nano 29.6 FPS using 173 MB, plate detection plus OCR about 25 ms per vehicle crop. These show compute speed only, not accuracy.
 
-- Use clear, frontal-ish photos (not extreme angles)
-- Multiple photos per person improve accuracy
-- Both full-face and periocular (upper-face) embeddings are built automatically
+Known limitations: two-line and hand-painted plates are an expected weak point of the global OCR model; night and infrared glare are untested; the development laptop is not suitable for 24/7 production use.
 
-### Mask-Robust Recognition
+## Setup
 
-When a person wears a mask, the system automatically:
-1. Detects mask via landmark analysis
-2. Falls back to periocular (eyes + forehead) matching
-3. Uses a stricter threshold to reduce false positives
+Windows, Python 3.11. Model weights, face data, databases, videos and credentials are not stored in the repository.
 
-> **Accuracy note**: Periocular-only matching is less accurate than full-face
-> (confidence drops ~0.15-0.30). This is a fundamental limitation — with only
-> eyes visible, different people can look more similar.
+    py -3.11 -m venv .venv
+    .venv\Scripts\activate
+    pip install -r requirements.txt
+    pip install -r requirements-vehicles.txt
+    copy .env.example .env
+    copy cameras.yaml.example cameras.yaml
 
----
+Vehicle tests (need no camera or model weights):
 
-## Setting the Gate Line
+    python -m pytest tests/test_indian_plate.py tests/test_eval.py tests/test_event_store.py -q
 
-The gate line determines where entry/exit is detected.
-Run with default settings first and watch where people cross.
+Some other tests need model weights or local data that are not in the repository.
 
-```bash
-# Move line lower (60% down the frame):
-python gate_monitor.py --source cctv.mp4 --line 0.6
+## Repository history
 
-# Move line higher (30% down the frame):
-python gate_monitor.py --source cctv.mp4 --line 0.3
-```
+Earlier history is not published, because it contained personal data (face enrollment images and attendance reports). This repository starts from a cleaned snapshot of the project: camera addresses and credentials were replaced by placeholders (set `RTSP_URL` in `.env`) and example person names in comments and tests were replaced by neutral names. Later work is reviewed through pull requests.
 
-The line should cut across the path people walk through.
+## Development approach
 
----
+Project direction, design and technical decisions: Sreenath-1. The implementation was developed with AI coding assistance (Claude, in the Antigravity IDE), working in phases with unit tests, automated code review (CodeRabbit) and a human approval step at the end of each phase.
 
-## Direction Logic
+## Licensing
 
-By default:
-- Person moving **downward** (toward bottom of frame) = **EXIT**
-- Person moving **upward** (toward top of frame) = **ENTRY / RETURN**
-
-If your camera is mounted differently and exits/entries are reversed:
-```bash
-python gate_monitor.py --source cctv.mp4 --flip
-```
-
----
-
-## Live RTSP Camera
-
-```bash
-python gate_monitor.py \
-  --source rtsp://USER:PASSWORD@CAMERA_IP:554/stream1 \
-  --line 0.5 \
-  --overstay 30 \
-  --record
-```
-
-For multiple cameras, run one instance per camera in separate terminals.
-
----
-
-## CSV Report Format
-
-```
-Person,Exit Time,Return Time,Duration,Status
-Alice,14:22:05,14:45:30,23m 25s,Returned
-Person #7,15:10:12,—,—,Still outside
-```
-
----
-
-## Performance Notes
-
-| Scenario | FPS (GPU) | Notes |
-|---|---|---|
-| YOLO11n + InsightFace + Quality Gate | ~22-25 | RTX 4050 GPU inference |
-| With --no-show | +5-10% | No display overhead |
-| With --resize 480 | ~25+ | Lower resolution, faster processing |
-| With --no-quality-gate | ~23-25 | Skips quality checks (not recommended) |
-
-**Mitigation for low FPS**: Face recognition runs every `--face-every N` frames
-(default: 15), not every frame. Increase this value for faster processing at
-the cost of slower face identification.
-
----
-
-## Stage 7: Production Features
-
-### Face Quality Gate
-Lightweight CPU checks run **before** face recognition to reject frames that
-would produce garbage embeddings:
-- **Face size**: Rejects tiny distant faces (< 40px minimum dimension)
-- **Sharpness**: Variance of Laplacian detects motion blur
-- **Pose angle**: PnP solve from 5-point landmarks rejects extreme profile views
-- **Brightness**: Rejects too-dark or blown-out face crops
-
-Enable/disable via `--quality-gate` / `--no-quality-gate` (default: ON).
-
-### Track-Level Embedding Fusion
-Instead of relying on a single frame's recognition result, each track
-accumulates up to K recognition observations. Identity is decided by
-majority vote, tie-broken by quality-weighted average embedding. This
-stabilizes identity across flickering matches.
-
-### Confidence-Tiered Decisions
-At crossing time, each person gets a decision tier:
-- **high** (confidence ≥ 0.75): Auto-accepted, no review needed
-- **uncertain** (0.35 ≤ confidence < 0.75): Logged with `needs_review=True`
-- **unresolved** (confidence < 0.35): Logged as "Unknown"
-
-### Tailgating Detection
-Detects when two people cross the gate line simultaneously with overlapping
-bounding boxes (IoU ≥ 0.3 for ≥ 5 consecutive frames). Flagged in both
-the `crossing_events` table and structured logs.
-
-### Decision Audit Log
-Every crossing writes a full audit record to the `decision_audit` table:
-- Frames considered vs. frames that passed quality gate
-- Rejection reason histogram (e.g., `{"TOO_BLURRY": 3, "PASS": 7}`)
-- Final confidence score and decision tier
-- Tailgate flag
-
-### Structured Debug Logging
-All per-frame events are logged to `gate_debug.log` (rotating, 5MB, 3 backups):
-```
-2026-09-22 12:30:15.123 | DEBUG | quality_gate | track=5 | score=0.234 | reason=TOO_BLURRY
-2026-09-22 12:30:15.200 | DEBUG | recognition | track=5 | name=Alice | similarity=0.823 | method=full
-2026-09-22 12:30:16.100 | INFO  | crossing | track=5 | event=exit | name=Alice | decision_tier=high
-```
-
-### Camera Motion Compensation (CMC)
-BoT-SORT uses sparse optical flow (`sparseOptFlow`) to compensate for camera
-vibration, improving track continuity without additional GPU cost (~1-3ms/frame).
-
----
-
-## Environment Variable Overrides
-
-All Stage 7 thresholds are configurable via environment variables or `.env`:
-
-| Variable | Default | Description |
-|---|---|---|
-| `GATE_MIN_FACE_PX` | 40 | Min face dimension (px) for recognition |
-| `GATE_MIN_SHARPNESS` | 15.0 | Laplacian variance threshold |
-| `GATE_MAX_YAW_DEG` | 45 | Max yaw angle before rejection |
-| `GATE_MAX_PITCH_DEG` | 35 | Max pitch angle before rejection |
-| `GATE_MIN_BRIGHTNESS` | 40 | Min mean pixel intensity |
-| `GATE_MAX_BRIGHTNESS` | 220 | Max mean pixel intensity |
-| `GATE_TRACK_BUFFER_K` | 5 | Embedding buffer size per track |
-| `GATE_HIGH_CONF` | 0.75 | Auto-accept confidence threshold |
-| `GATE_LOW_CONF` | 0.35 | Below this = unresolved |
-| `GATE_TAILGATE_IOU` | 0.3 | IoU threshold for tailgate detection |
-| `GATE_TAILGATE_MIN_FRAMES` | 5 | Consecutive frames for tailgate |
-| `GATE_DEBUG_LOG` | gate_debug.log | Debug log file path |
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| Nobody detected | Lower `--conf 0.25` |
-| Wrong direction | Add `--flip` flag |
-| Count at wrong place | Adjust `--line` value |
-| Slow on CPU | Add `--no-show` and/or `--resize 480` |
-| RTSP not connecting | Test URL in VLC first |
-| Face not recognized | Add more reference photos, lower `--face-threshold` |
-| No face in top-down view | Face recognition requires face-visible angle |
-| Too many quality rejections | Lower `GATE_MIN_SHARPNESS` or `GATE_MIN_FACE_PX` |
-| False tailgate alerts | Raise `GATE_TAILGATE_IOU` (e.g., 0.5) |
-| Debug log too large | Set `GATE_DEBUG_LOG` to `/dev/null` or NUL |
+All rights reserved pending agreement with the client. Third-party components keep their own licences; see `LICENSING.md`. Note: Ultralytics YOLO is AGPL-3.0 and InsightFace is non-commercial; both need a decision before any paid delivery.
