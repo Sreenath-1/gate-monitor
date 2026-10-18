@@ -57,10 +57,6 @@ Standalone integration tests (need model weights or local data):
 
 Earlier history is not published. This repository starts from a cleaned snapshot of the project; camera addresses and credentials are placeholders (set `RTSP_URL` in `.env`). Later work is reviewed through pull requests.
 
-## Development approach
-
-Project direction, design and technical decisions: Sreenath-1. The implementation was developed with AI coding assistance (Claude, in the Antigravity IDE), working in phases with unit tests, automated code review (CodeRabbit) and a human approval step at the end of each phase.
-
 ## Licensing
 
 All rights reserved. Third-party components keep their own licences; see `LICENSING.md`. Ultralytics YOLO is AGPL-3.0 and InsightFace weights are non-commercial research only, so review both before any commercial use.
