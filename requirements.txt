@@ -1,0 +1,13 @@
+# Gate Monitor Requirements
+# pip install -r requirements.txt
+
+ultralytics>=8.3.0       # YOLO11 + BoT-SORT/ByteTrack built-in
+opencv-python>=4.8.0
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+insightface>=0.7.3       # ArcFace face recognition (buffalo_l with SCRFD)
+onnxruntime>=1.16.0      # ONNX inference backend for InsightFace
+
+# NOTE: python-dotenv is NOT required — config.py includes a built-in
+# .env parser to avoid the extra dependency.
