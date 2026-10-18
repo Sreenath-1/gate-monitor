@@ -18,6 +18,11 @@ Key changes from the original:
 
 import sys
 import os
+
+# Force UTF-8 output on Windows (cp1252 can't encode ≤, ⚠, ✓ etc.)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 import time
 import json
 import argparse
@@ -377,6 +382,13 @@ def main():
         cy2 = min(h_f, y2 + pad_y)
         crop = frame_bgr[cy1:cy2, cx1:cx2]
 
+        # Test the crop to see if ArcFace will succeed or fall back to _raw later
+        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        import face_id
+        print(f"\n  [DEBUG] Testing crop extraction for {idx+1}/{len(selected)}")
+        face_obj, emb, det_score = face_id._get_face_and_embedding(crop_rgb)
+        extraction_path = "aligned_crop" if emb is not None else "raw_fallback"
+
         dt_str = datetime.now(IST).strftime("%Y%m%d_%H%M%S")
         filename = f"{employee_id}_{dt_str}_{idx+1}.jpg"
 
@@ -388,7 +400,7 @@ def main():
         print(f"  [{idx+1}/{len(selected)}] {filename}"
               f" | bucket={er.bucket}"
               f" | yaw={er.yaw:.1f}° masked={er.is_masked}"
-              f" | sharp={er.sharpness:.0f} bright={er.brightness:.0f}"
+              f" | path={extraction_path}"
               f" | det={cf['det_score']:.3f}")
 
         saved_metadata.append({
@@ -400,6 +412,7 @@ def main():
             "sharpness":  round(float(er.sharpness), 2),
             "brightness": round(float(er.brightness), 2),
             "det_score":  round(float(cf["det_score"]), 4),
+            "extraction_path": extraction_path,
         })
 
     # ── Write or Merge bucket_metadata.json ───────────────────────────────────
@@ -440,6 +453,47 @@ def main():
     print(f"\nSuccessfully enrolled {display_name} (ID: {employee_id}): "
           f"{len(saved_metadata)} frames across "
           f"{sum(1 for c in bucket_counts.values() if c > 0)}/{len(ALL_BUCKETS)} buckets.")
+
+    # ── Fallback Analysis ─────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print(f"  ENROLLMENT QUALITY AUDIT")
+    print(f"{'='*60}")
+    
+    fallback_warnings = []
+    
+    for b in ALL_BUCKETS:
+        bucket_frames = [f for f in saved_metadata if f["bucket"] == b]
+        if not bucket_frames:
+            continue
+            
+        total_b = len(bucket_frames)
+        raw_b = sum(1 for f in bucket_frames if f["extraction_path"] == "raw_fallback")
+        aligned_b = total_b - raw_b
+        raw_pct = (raw_b / total_b) * 100
+        
+        print(f"  [{b}]: {total_b} frames")
+        print(f"      aligned_crop : {aligned_b} ({100-raw_pct:.1f}%)")
+        print(f"      raw_fallback : {raw_b} ({raw_pct:.1f}%)")
+        
+        if raw_pct > 25:
+            fallback_warnings.append(f"[{b}] has {raw_pct:.1f}% raw_fallback (>{total_b} frames total, {raw_b} bad).")
+            
+    if fallback_warnings:
+        print(f"\n{'!'*60}")
+        print(f"  ⚠  BAD CAPTURE WARNING: HIGH RAW_FALLBACK RATE")
+        print(f"{'!'*60}")
+        for w in fallback_warnings:
+            print(f"  {w}")
+        print(f"")
+        print(f"  InsightFace ArcFace requires strict 5-point aligned crops for")
+        print(f"  full-face embeddings. Frames that fallback to '_raw' are UNALIGNED")
+        print(f"  and will destroy genuine face similarity, leading to rejection.")
+        print(f"")
+        print(f"  ACTION REQUIRED: Re-capture the above buckets under better")
+        print(f"  lighting and framing so the crop extraction succeeds.")
+        print(f"{'!'*60}\n")
+    else:
+        print(f"\n  ✓ All populated buckets passed the alignment extraction check.")
 
     if empty_buckets:
         print(f"\n⚠  Still missing buckets: {empty_buckets}")

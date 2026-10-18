@@ -222,7 +222,13 @@ def _detect_mask_for_enrollment(face_obj) -> bool:
     # Low det_score (< 0.65) is still a useful secondary signal at full resolution
     is_masked_score = hasattr(face_obj, 'det_score') and face_obj.det_score < 0.65
 
-    return is_masked_ratio or is_masked_proximity or is_masked_score
+    is_masked = is_masked_ratio or is_masked_proximity or is_masked_score
+    print(f"  [DEBUG] MASK: score={getattr(face_obj, 'det_score', 0):.3f} "
+          f"| ratio_mouth={ratio_mouth:.3f} (<0.75? {is_masked_ratio}) "
+          f"| ratio_nose_mouth={ratio_nose_mouth:.3f} (<0.30? {is_masked_proximity}) "
+          f"-> {is_masked}")
+
+    return is_masked
 
 
 def select_per_bucket(

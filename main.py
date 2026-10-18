@@ -1,9 +1,14 @@
 """
 main.py
 =======
-Pipeline orchestrator for the Warehouse Entry/Exit Detection System.
+Pipeline orchestrator for the Gate Monitor system.
 
-Composes all modules:
+Operational modes:
+  --mode attendance    Original warehouse entry/exit detection (default)
+  --mode search        "Find this person" open-set face search (Stages 2-5)
+  --mode sources-check Camera diagnostics — test all cameras for N seconds
+
+Attendance mode composes all modules:
   config.py    → CLI args + constants + .env loading
   stream.py    → Video/RTSP source handling (with auto-reconnect)
   detector.py  → YOLOv11 person detection + tracking (with imgsz optimization)
@@ -12,26 +17,20 @@ Composes all modules:
   visualizer.py → OpenCV drawing functions
   face_id.py   → (optional) Face recognition
 
-Flow per frame:
-  1. Read frame from source (auto-resized from native to 720p)
-  2. Run YOLOv11 detection + BoT-SORT tracking (at imgsz=480 for speed)
-  3. For each tracked person, check zone crossing (with debounce)
-  4. Log any crossing events to SQLite (IST timestamps)
-  5. Draw visualization
-  6. Display / record
+Search mode (Stages 2+) uses:
+  camera_manager.py → Multi-camera source management
+  (future stages)   → Embedding store, probe builder, matcher, search UI
 
 Usage:
-    # Video file:
+    # Attendance (default — unchanged behavior):
     python main.py --source cctv.mp4
-
-    # Live RTSP (URL loaded from .env):
     python main.py --source rtsp
 
-    # Live RTSP with explicit URL:
-    python main.py --source rtsp://CAMERA_IP/live/0/MAIN
+    # Camera diagnostics:
+    python main.py --mode sources-check
 
-    # With recording and custom settings:
-    python main.py --source rtsp --record --line 0.5 --imgsz 384
+    # Person search (Stages 2+):
+    python main.py --mode search
 """
 
 import sys
@@ -108,7 +107,8 @@ def get_logical_track(raw_tid, matched_name, track_mapping, track_names, next_lo
     return logical_tid
 
 
-def main():
+def main_attendance():
+    """Original warehouse entry/exit detection mode (--mode attendance)."""
     args = parse_args()
 
     # ── Banner ────────────────────────────────────────────────────────────
@@ -607,6 +607,238 @@ def main():
     print(f"  Duration         : {fmt_duration(elapsed_total)}")
     print(f"  Database         : {args.db}")
     print(f"{'='*60}\n")
+
+
+
+def main():
+    """Entry point — dispatches to the correct mode."""
+    args = parse_args()
+
+    if args.mode == "sources-check":
+        # Camera diagnostics mode
+        from camera_manager import run_sources_check
+        run_sources_check(
+            yaml_path=args.cameras_yaml,
+            duration=args.sources_check_duration,
+            resize_height=args.resize,
+        )
+
+    elif args.mode == "vehicles":
+        # Vehicle ANPR mode
+        main_vehicles(args)
+
+    elif args.mode == "search":
+        # Person search mode — full pipeline
+        main_search(args)
+
+    elif args.mode == "attendance":
+        # Original attendance mode — call existing logic
+        main_attendance()
+
+    else:
+        print(f"  Unknown mode: {args.mode}")
+        sys.exit(1)
+
+
+def main_vehicles(args):
+    """Vehicle ANPR mode — detect vehicles, read plates, log events."""
+    import logging
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)-20s %(levelname)s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    print(f"\n{'='*60}")
+    print(f"  VEHICLE ANPR MODE")
+    print(f"{'='*60}")
+
+    # Determine source
+    source = getattr(args, 'source', None)
+    if not source:
+        camera_id = getattr(args, 'camera_id', None)
+        if camera_id:
+            import yaml
+            yaml_path = getattr(args, 'cameras_yaml', 'cameras.yaml')
+            with open(yaml_path) as f:
+                cams = yaml.safe_load(f) or {}
+            cam = cams.get(camera_id, {})
+            source = cam.get('hires_stream') or cam.get('url', '')
+            print(f"  Camera '{camera_id}': {source}")
+        else:
+            print("  ERROR: --source or --camera-id required for vehicles mode")
+            sys.exit(1)
+
+    print(f"  Source: {source}")
+    print(f"  Require GPU: {getattr(args, 'require_gpu', False)}")
+
+    # Initialize event store
+    from event_store import EventStore
+    store = EventStore(
+        db_path=os.path.join("data", "events.db"),
+        crop_dir=os.path.join("data", "crops"),
+    )
+    print(f"  Event store: data/events.db (WAL mode)")
+
+    # Initialize dashboard
+    from dashboard import Dashboard, broadcast_event
+    host = getattr(args, 'host', '0.0.0.0')
+    port = getattr(args, 'port', 8000)
+
+    # Initialize pipeline
+    from vehicle_pipeline import VehiclePipeline
+    pipeline = VehiclePipeline(
+        source=source,
+        frame_skip=2,
+        conf_threshold=getattr(args, 'conf', 0.35),
+        require_gpu=getattr(args, 'require_gpu', False),
+        gpu_temp_limit=80,
+        min_plate_px=60,
+    )
+
+    # Register event callback: store to DB + broadcast via SSE
+    def on_track_event(event):
+        event_id = store.insert_event(event)
+        broadcast_event({
+            "id": event_id,
+            "track_id": event.track_id,
+            "plate_text": event.plate_text,
+            "plate_confidence": round(event.plate_confidence, 2),
+            "plate_valid": event.plate_valid,
+            "vehicle_type": event.vehicle_type,
+            "state_code": event.state_code,
+            "needs_review": event.needs_review,
+            "duration_s": round(event.duration_s, 1),
+            "n_plate_reads": event.n_plate_reads,
+        })
+
+    pipeline.on_event(on_track_event)
+
+    # Start dashboard (non-blocking)
+    dashboard = Dashboard(store, pipeline, host=host, port=port)
+    dashboard.start(block=False)
+    print(f"  Dashboard: http://{host}:{port}")
+
+    # Check disk space
+    import psutil
+    disk = psutil.disk_usage(os.getcwd())
+    free_gb = disk.free / (1024**3)
+    if free_gb < 20:
+        print(f"  ⚠ LOW DISK: {free_gb:.1f} GB free (< 20 GB threshold)")
+
+    print(f"{'='*60}\n")
+    print(f"  Pipeline starting... (Ctrl+C to stop)\n")
+
+    # Run pipeline (blocks until stopped)
+    try:
+        pipeline.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stats = pipeline.stats
+        store.close()
+        print(f"\n{'='*60}")
+        print(f"  SESSION COMPLETE")
+        print(f"{'='*60}")
+        print(f"  Frames processed : {stats.get('frames_processed', 0)}")
+        print(f"  Duration         : {stats.get('elapsed_s', 0):.0f}s")
+        print(f"  Avg FPS          : {stats.get('fps', 0):.1f}")
+        print(f"  Total tracks     : {stats.get('total_tracks', 0)}")
+        print(f"  Peak VRAM        : {stats.get('vram_peak_mb', 0):.0f} MB")
+        print(f"  Peak RSS         : {stats.get('rss_mb', 0):.0f} MB")
+        print(f"{'='*60}\n")
+
+
+def main_search(args):
+    """Person search mode — 'find this person' pipeline."""
+    import signal
+
+    print(f"\n{'='*60}")
+    print(f"  PERSON SEARCH MODE")
+    print(f"{'='*60}")
+
+    # ── 1. Load cameras ──────────────────────────────────────────────
+    from camera_manager import CameraManager
+    cam_mgr = CameraManager(args.cameras_yaml, resize_height=args.resize)
+
+    enabled = list(cam_mgr.enabled_cameras.keys())
+    print(f"  Cameras: {', '.join(enabled)}")
+
+    # ── 2. Load face embedder ────────────────────────────────────────
+    from face_embedder import InsightFaceEmbedder
+    embedder = InsightFaceEmbedder(det_size=(320, 320))
+
+    # ── 3. Initialize observation store ──────────────────────────────
+    from observation_store import ObservationStore
+    store = ObservationStore()
+    print(f"  Observation store: {store.observation_count} existing observations")
+
+    # ── 4. Start ingest pipeline ─────────────────────────────────────
+    from ingest_pipeline import IngestManager
+
+    # Detector args passed to IngestManager; it creates one PersonDetector
+    # per camera so each has its own YOLO tracker state.
+    detector_kwargs = dict(
+        weights=args.weights,
+        conf=args.conf,
+        iou=args.iou,
+        imgsz=args.imgsz,
+        tracker=args.tracker,
+    )
+
+    cam_mgr.start_all()
+    ingest = IngestManager(cam_mgr, embedder, store,
+                            detector_kwargs=detector_kwargs,
+                            detect_fps=5.0, idle_fps=1.0)
+    ingest.start_all()
+
+    print(f"  Ingest pipeline running on {len(ingest.workers)} cameras")
+
+    # ── 5. Handle search command ─────────────────────────────────────
+    photo = getattr(args, 'photo', None)
+    watch = getattr(args, 'watch', False)
+    web = getattr(args, 'web', False)
+
+    if web:
+        # Start web UI
+        from search_api import start_web_server
+        start_web_server(store, embedder, cam_mgr, ingest,
+                         port=getattr(args, 'web_port', 8501))
+        print(f"\n  Web UI available. Ingest running in background.")
+        print(f"  Press Ctrl+C to stop.\n")
+
+    if photo:
+        # Direct search
+        from search_api import cli_search
+        cli_search(photo, store, embedder,
+                   last_minutes=getattr(args, 'last_minutes', 30),
+                   watch=watch, camera_ids=None)
+    elif not web:
+        # Interactive mode
+        from search_api import interactive_search
+        interactive_search(store, embedder)
+
+    # Keep running if web mode or watch mode
+    if web or watch:
+        def _shutdown(sig, frame):
+            print("\n  Shutting down...")
+            ingest.stop_all()
+            cam_mgr.stop_all()
+            ingest.print_stats()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _shutdown)
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            _shutdown(None, None)
+    else:
+        ingest.stop_all()
+        cam_mgr.stop_all()
+        ingest.print_stats()
 
 
 if __name__ == "__main__":

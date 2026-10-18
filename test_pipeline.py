@@ -58,7 +58,7 @@ def test_import_config():
 def test_import_stream():
     from stream import FrameSource, ThreadedCapture, check_connection, is_stream_source
     assert is_stream_source("rtsp://test") == True
-    assert is_stream_source("cctv.mp4") == False
+    assert is_stream_source("test-footage/cctv.mp4") == False
     assert is_stream_source("0") == False
 
 def test_import_detector():
@@ -102,7 +102,7 @@ print("\n  [Video Source]")
 
 def test_video_opens():
     from stream import FrameSource
-    src = FrameSource("cctv.mp4", resize_height=0)
+    src = FrameSource("test-footage/cctv.mp4", resize_height=0)
     info = src.info_dict()
     assert src.raw_width > 0, "Width is 0"
     assert src.raw_height > 0, "Height is 0"
@@ -129,7 +129,7 @@ def test_yolo_inference():
     import cv2
     from detector import PersonDetector
     det = PersonDetector("yolo11n.pt", imgsz=480)
-    cap = cv2.VideoCapture("cctv.mp4")
+    cap = cv2.VideoCapture("test-footage/cctv.mp4")
     # Skip to a frame with a person (frame 30 based on direction analysis)
     cap.set(cv2.CAP_PROP_POS_FRAMES, 30)
     ret, frame = cap.read()
@@ -154,7 +154,7 @@ def test_tracking():
     import cv2
     from detector import PersonDetector
     det = PersonDetector("yolo11n.pt", tracker="botsort.yaml", imgsz=480)
-    cap = cv2.VideoCapture("cctv.mp4")
+    cap = cv2.VideoCapture("test-footage/cctv.mp4")
     track_ids_seen = set()
     for i in range(50):
         ret, frame = cap.read()

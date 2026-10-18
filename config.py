@@ -1,12 +1,18 @@
 """
 config.py
 =========
-Central configuration for the warehouse entry/exit detection pipeline.
+Central configuration for the gate monitor pipeline.
+
+Supports two operational modes:
+  --mode attendance   Original warehouse entry/exit detection (default)
+  --mode search       "Find this person" open-set face search
+  --mode sources-check  Camera diagnostics (check all cameras for N seconds)
 
 All tuneable constants, CLI argument parsing, and zone definitions live here.
 Other modules import from this file — nothing is hardcoded elsewhere.
 
 RTSP credentials and secrets are loaded from a .env file (never hardcoded).
+Camera definitions (non-secret) are loaded from cameras.yaml.
 """
 
 import argparse
@@ -117,6 +123,7 @@ MAX_BRIGHTNESS    = int(os.environ.get("GATE_MAX_BRIGHTNESS", "220"))
 # ─────────────────────────────────────────────────────────────────────────────
 GATE_FACE_THRESHOLD = float(os.environ.get("GATE_FACE_THRESHOLD", "0.6"))
 GATE_PERIOCULAR_THRESHOLD = float(os.environ.get("GATE_PERIOCULAR_THRESHOLD", "0.3"))
+GATE_PERIOCULAR_VOTE_FLOOR = float(os.environ.get("GATE_PERIOCULAR_VOTE_FLOOR", "0.15"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  OPEN-SET REJECTION — ABSOLUTE SIMILARITY FLOORS
@@ -132,7 +139,7 @@ GATE_PERIOCULAR_THRESHOLD = float(os.environ.get("GATE_PERIOCULAR_THRESHOLD", "0
 #   These MUST be validated against real held-out unknown-person footage before
 #   treating them as production-ready. See test_open_set_rejection.py.
 GATE_ABS_FLOOR_FULLFACE = float(os.environ.get("GATE_ABS_FLOOR_FULLFACE", "0.40"))
-GATE_ABS_FLOOR_PERIOCULAR = float(os.environ.get("GATE_ABS_FLOOR_PERIOCULAR", "0.30"))
+GATE_ABS_FLOOR_PERIOCULAR = float(os.environ.get("GATE_ABS_FLOOR_PERIOCULAR", "0.35"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  THIN-MARGIN FLAGGING (open-set safety)
@@ -191,31 +198,81 @@ C_PANEL   = (10,  10,  10)   # Near-black panel background
 # ─────────────────────────────────────────────────────────────────────────────
 #  ARGUMENT PARSER
 # ─────────────────────────────────────────────────────────────────────────────
+# Valid operational modes
+VALID_MODES = ("attendance", "search", "sources-check", "vehicles")
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  VEHICLE ANPR DEFAULTS (--mode vehicles)
+# ─────────────────────────────────────────────────────────────────────────────
+VEHICLE_FRAME_SKIP         = int(os.environ.get("VEHICLE_FRAME_SKIP", "2"))       # Process every Nth frame (12-15 FPS from 25 FPS)
+VEHICLE_DETECT_IMGSZ       = int(os.environ.get("VEHICLE_DETECT_IMGSZ", "640"))   # Detection inference resolution
+VEHICLE_CONF_THRESHOLD     = float(os.environ.get("VEHICLE_CONF_THRESHOLD", "0.35"))
+VEHICLE_MIN_PLATE_PX       = int(os.environ.get("VEHICLE_MIN_PLATE_PX", "60"))    # Minimum plate width in pixels
+VEHICLE_PLATE_PAD_RATIO    = float(os.environ.get("VEHICLE_PLATE_PAD", "0.12"))   # Pad plate box by 12%
+VEHICLE_QUALITY_TOPK       = int(os.environ.get("VEHICLE_QUALITY_TOPK", "8"))     # Best crops per track
+VEHICLE_EMIT_THRESHOLD     = float(os.environ.get("VEHICLE_EMIT_THRESHOLD", "0.5"))
+VEHICLE_EMIT_MIN_READS     = int(os.environ.get("VEHICLE_EMIT_MIN_READS", "3"))
+VEHICLE_MERGE_DISTANCE     = int(os.environ.get("VEHICLE_MERGE_DIST", "1"))       # Edit distance for track merge
+VEHICLE_MERGE_WINDOW_SECS  = int(os.environ.get("VEHICLE_MERGE_WINDOW", "60"))    # Seconds for track merge window
+VEHICLE_CROP_RETENTION_DAYS = int(os.environ.get("VEHICLE_CROP_RETENTION", "30"))
+VEHICLE_GPU_TEMP_LIMIT     = int(os.environ.get("VEHICLE_GPU_TEMP_LIMIT", "80"))  # Adaptive load-shedding threshold
+
+
+
 def build_argparser():
     """Build and return the argument parser (does not call parse_args yet)."""
     p = argparse.ArgumentParser(
-        description="Warehouse Entry/Exit Detection System",
+        description="Gate Monitor — Attendance Tracker & Person Search System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Test with video file:
-  python main.py --source cctv.mp4
+Modes:
+  attendance     Original warehouse entry/exit detection (default)
+  search         "Find this person" open-set face search across cameras
+  sources-check  Camera diagnostic — check all cameras for 30s and report
 
-  # Live RTSP camera (URL loaded from .env file):
+Examples:
+  # Attendance mode (default — unchanged behavior):
+  python main.py --source cctv.mp4
   python main.py --source rtsp
 
-  # Live RTSP with explicit URL:
-  python main.py --source rtsp://CAMERA_IP/live/0/MAIN
+  # Check all cameras defined in cameras.yaml:
+  python main.py --mode sources-check
 
-  # Custom gate line and overstay:
-  python main.py --source cctv.mp4 --line 0.6 --overstay 15
+  # Person search mode (Stages 2-5):
+  python main.py --mode search
         """
     )
 
-    # ── Source ────────────────────────────────────────────────────────────
+    # ── Mode ─────────────────────────────────────────────────────────────
+    p.add_argument("--mode", type=str, default="attendance",
+                   choices=VALID_MODES,
+                   help="Operational mode. Default: attendance")
+
+    # ── Camera config ────────────────────────────────────────────────────
+    p.add_argument("--cameras-yaml", type=str,
+                   default=str(Path(__file__).parent / "cameras.yaml"),
+                   help="Path to cameras.yaml config. Default: cameras.yaml")
+    p.add_argument("--sources-check-duration", type=int, default=30,
+                   help="Duration in seconds for sources-check mode. Default: 30")
+
+    # ── Search mode options ──────────────────────────────────────────────
+    p.add_argument("--photo", type=str, default=None,
+                   help="Path to target photo for search mode.")
+    p.add_argument("--last-minutes", type=float, default=30,
+                   help="Search the last N minutes. Default: 30")
+    p.add_argument("--face-index", type=int, default=None,
+                   help="If multiple faces in photo, select this index (0-based).")
+    p.add_argument("--watch", action="store_true",
+                   help="After retro search, keep watching for live matches.")
+    p.add_argument("--web", action="store_true",
+                   help="Start FastAPI web UI for search (127.0.0.1:8501).")
+    p.add_argument("--web-port", type=int, default=8501,
+                   help="Port for web UI. Default: 8501")
+
+    # ── Source (for attendance mode / single-camera) ─────────────────────
     p.add_argument("--source", type=str, default="cctv.mp4",
                    help="Video file path, RTSP URL, or 'rtsp' to load URL from .env. "
-                        "Default: cctv.mp4")
+                        "Used by attendance mode. Default: cctv.mp4")
 
     # ── Detection ────────────────────────────────────────────────────────
     p.add_argument("--weights", type=str, default=WEIGHTS,
@@ -293,6 +350,16 @@ Examples:
     p.add_argument("--debug-log", type=str, default=DEBUG_LOG_FILE,
                    help=f"Path for structured debug log. Default: {DEBUG_LOG_FILE}")
 
+    # ── Vehicle ANPR (--mode vehicles) ──────────────────────────────────
+    p.add_argument("--require-gpu", action="store_true", default=False,
+                   help="Fail fast if CUDA is not the active ONNX/torch provider")
+    p.add_argument("--camera-id", type=str, default="cctv_gate",
+                   help="Camera ID from cameras.yaml (vehicles mode). Default: cctv_gate")
+    p.add_argument("--host", type=str, default="127.0.0.1",
+                   help="Dashboard bind address. Default: 127.0.0.1")
+    p.add_argument("--port", type=int, default=8502,
+                   help="Dashboard port (vehicles mode). Default: 8502")
+
     return p
 
 
@@ -301,6 +368,7 @@ def parse_args():
 
     Special handling:
       --source rtsp  → expands to the RTSP_URL from .env / environment
+      --mode sources-check → routes to camera diagnostics
     """
     args = build_argparser().parse_args()
 

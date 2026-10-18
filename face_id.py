@@ -35,6 +35,7 @@ from pathlib import Path
 # Lazy imports so gate_monitor.py doesn't crash if insightface is missing
 _insightface_available = False
 _face_app = None
+_mask_classifier_sess = None
 
 
 def _load_insightface():
@@ -67,66 +68,79 @@ def _load_insightface():
                 loaded_providers = first_model.session.get_providers()
                 
         print(f"  [face_id] InsightFace buffalo_l loaded. Active providers: {loaded_providers}")
+        
+        # Load the custom mask classifier
+        global _mask_classifier_sess
+        mask_model_path = os.path.join(os.path.dirname(__file__), "weights", "mask_classifier.onnx")
+        if os.path.exists(mask_model_path):
+            import onnxruntime as ort
+            # Always fallback to CPU to avoid CUDA dependency issues with the small model
+            _mask_classifier_sess = ort.InferenceSession(mask_model_path, providers=["CPUExecutionProvider"])
+            print("  [face_id] Custom Mask Classifier (MobileNetV2) loaded.")
+        else:
+            print(f"  [face_id] WARNING: mask_classifier.onnx not found at {mask_model_path}. Mask detection will default to False.")
+
         return True
     except Exception as e:
         print(f"  [face_id] WARNING: InsightFace not available: {e}")
         return False
 
 
-def _is_masked(face):
+def _is_masked(face, img_rgb=None):
     """
-    Heuristic mask detection using InsightFace's 5-point landmarks.
-
-    Landmarks (kps): [left_eye, right_eye, nose_tip, mouth_left, mouth_right]
-    (indices:          0          1          2         3            4        )
-
-    Strategy: If the face is masked, the nose and mouth landmarks are either:
-    - Missing / unreliable (low detection score with partial face)
-    - Abnormally close to the eye line (mask pushes them up)
-    - The vertical spread between eyes and mouth is compressed
-
-    We check the ratio of (eye_to_mouth_distance / eye_to_eye_distance).
-    Normal face: ratio ~1.0-1.5. Masked face: ratio < 0.6 (landmarks squeezed).
-
-    Also check if the detection score is low — masked faces get lower det_score.
+    Mask detection using the custom MobileNetV2 ONNX model.
     """
-    if not hasattr(face, 'kps') or face.kps is None:
-        return False  # No landmarks = can't determine, assume not masked
-
-    kps = face.kps  # shape (5, 2)
-    left_eye = kps[0]
-    right_eye = kps[1]
-    nose = kps[2]
-    mouth_left = kps[3]
-    mouth_right = kps[4]
-
-    # Inter-eye distance (baseline)
-    eye_dist = np.linalg.norm(left_eye - right_eye)
-    if eye_dist < 5:  # Too small to analyze
+    global _mask_classifier_sess
+    
+    # Check if we have the model and the original image
+    if _mask_classifier_sess is None or img_rgb is None:
+        # Fallback if model not loaded or image not provided
+        if hasattr(face, 'det_score') and face.det_score < 0.5:
+            return True
         return False
 
-    # Eye center
-    eye_center = (left_eye + right_eye) / 2
-
-    # Mouth center
-    mouth_center = (mouth_left + mouth_right) / 2
-
-    # Vertical distance from eye line to mouth
-    eye_to_mouth = abs(mouth_center[1] - eye_center[1])
-
-    # Ratio: how far down is the mouth relative to inter-eye distance
-    ratio = eye_to_mouth / eye_dist
-
-    # Normal face: ratio ~1.0-1.5
-    # Masked face: landmarks get squeezed, ratio drops below ~0.7
-    # Also: low detection score often indicates occlusion
-    is_masked = ratio < 0.7
-
-    # Additional signal: if det_score is notably low, more likely masked
-    if hasattr(face, 'det_score') and face.det_score < 0.5:
-        is_masked = True
-
-    return is_masked
+    if face.bbox is None:
+        return False
+        
+    try:
+        import cv2
+        # Crop face using bbox
+        x1, y1, x2, y2 = map(int, face.bbox)
+        # Add a small 10% padding
+        h, w = y2 - y1, x2 - x1
+        pad_y, pad_x = int(h * 0.1), int(w * 0.1)
+        
+        crop_y1 = max(0, y1 - pad_y)
+        crop_y2 = min(img_rgb.shape[0], y2 + pad_y)
+        crop_x1 = max(0, x1 - pad_x)
+        crop_x2 = min(img_rgb.shape[1], x2 + pad_x)
+        
+        face_crop = img_rgb[crop_y1:crop_y2, crop_x1:crop_x2]
+        
+        if face_crop.size == 0:
+            return False
+            
+        # Preprocess for ONNX MobileNetV2
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        
+        img = cv2.resize(face_crop, (112, 112))
+        img = img.astype(np.float32) / 255.0
+        img = (img - mean) / std
+        img = np.transpose(img, (2, 0, 1))
+        inp = np.expand_dims(img, axis=0)
+        
+        ort_inputs = {_mask_classifier_sess.get_inputs()[0].name: inp}
+        ort_outs = _mask_classifier_sess.run(None, ort_inputs)
+        
+        pred_logit = ort_outs[0][0][0]
+        pred_prob = 1.0 / (1.0 + np.exp(-pred_logit))
+        
+        return pred_prob > 0.5
+        
+    except Exception as e:
+        print(f"  [DEBUG] Mask classifier failed: {e}")
+        return False
 
 
 def _mask_lower_face(img_rgb, face):
@@ -258,6 +272,7 @@ def _get_face_and_embedding(img_rgb):
 
     faces = _face_app.get(img_rgb)
     if not faces:
+        print("  [DEBUG] _get_face_and_embedding: detection failed (app.get returned empty)")
         # FALLBACK: If mask confuses RetinaFace, synthesize a dummy face.
         # Estimate head proportion based on YOLO crop aspect ratio.
         h, w = img_rgb.shape[:2]
@@ -293,6 +308,18 @@ def _get_face_and_embedding(img_rgb):
     if hasattr(face, 'embedding') and face.embedding is not None:
         emb = face.embedding / np.linalg.norm(face.embedding)
         return face, emb, float(face.det_score)
+    
+    # Debug: why is embedding None? Try manual alignment to surface the exception.
+    print(f"  [DEBUG] _get_face_and_embedding: face.embedding is None! (det_score={face.det_score:.3f})")
+    try:
+        from insightface.utils import face_align
+        aimg = face_align.norm_crop(img_rgb, face.kps)
+        print("  [DEBUG] norm_crop succeeded manually, but embedding is missing?")
+    except Exception as e:
+        print(f"  [DEBUG] ALIGNMENT EXCEPTION: {type(e).__name__} - {str(e)}")
+        import traceback
+        traceback.print_exc()
+
     return face, None, float(face.det_score)
 
 
@@ -384,11 +411,17 @@ def build_known_encodings(known_faces_dir):
             if bucket_meta:
                 bucket = filename_to_bucket.get(fname)
                 if bucket is None:
-                    # Photo not in metadata — skip to keep gallery clean
-                    print(f"  [face_id]   {name}/{fname}: not in bucket metadata — skipping")
-                    continue
-                use_for_full = bucket in _FULL_FACE_BUCKETS
-                use_for_peri = bucket in _PERI_BUCKETS
+                    # Photo predates bucket metadata — use in classic mode
+                    # (both full-face and periocular) rather than skipping.
+                    # This keeps older enrollment images as a fallback when
+                    # the metadata-referenced crops fail InsightFace detection.
+                    use_for_full = True
+                    use_for_peri = True
+                    bucket = "legacy_unclassified"
+                    print(f"  [face_id]   {name}/{fname}: not in bucket metadata — using as legacy (full+peri)")
+                else:
+                    use_for_full = bucket in _FULL_FACE_BUCKETS
+                    use_for_peri = bucket in _PERI_BUCKETS
             else:
                 # No metadata: classic mode — use everything for both templates
                 use_for_full = True
@@ -404,23 +437,27 @@ def build_known_encodings(known_faces_dir):
                 face_obj, emb, det_score = _get_face_and_embedding(img_rgb)
                 
                 # Fallback: if RetinaFace fails on the crop (because it lacks context),
-                # try running it on the uncropped full frame saved in _raw/
+                # try running it on the uncropped full frame saved in _raw/, BUT ONLY
+                # FOR PERIOCULAR. Full-face ArcFace embeddings require strict 5-point
+                # alignment on crops. Using raw frames destroys genuine full-face similarity.
                 if emb is None:
+                    print(f"  [face_id]   {name}/{fname}: crop failed. Skipping full-face (requires proper alignment)")
+
+                if emb is not None and use_for_full:
+                    full_embeddings.append(emb)
+                    print(f"  [face_id]   {name}/{fname}: full-face encoded OK (aligned_crop) "
+                          f"(det_score={det_score:.3f}, bucket={bucket})")
+
+                # Periocular is less alignment-sensitive, so we can use the raw fallback here
+                if face_obj is None:
                     raw_path = photo_path.parent / "_raw" / photo_path.name
                     if raw_path.exists():
                         raw_bgr = cv2.imread(str(raw_path))
                         if raw_bgr is not None:
                             raw_rgb = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
                             face_obj, emb, det_score = _get_face_and_embedding(raw_rgb)
-                            if emb is not None:
-                                print(f"  [face_id]   {name}/{fname}: crop failed, recovered using _raw frame")
-
-                if emb is not None and use_for_full:
-                    full_embeddings.append(emb)
-                    print(f"  [face_id]   {name}/{fname}: full-face encoded OK "
-                          f"(det_score={det_score:.3f}, bucket={bucket})")
-                elif emb is None:
-                    print(f"  [face_id]   {name}/{fname}: no face detected (even with raw fallback) — skipping")
+                            if face_obj is not None:
+                                print(f"  [face_id]   {name}/{fname}: recovered face_obj using _raw frame for periocular fallback")
 
                 if face_obj is not None and use_for_peri:
                     peri_emb, _ = _get_embedding(
@@ -509,8 +546,9 @@ class FaceIdentifier:
     def __init__(self, known_encodings, match_every_n=15, threshold=0.4,
                  peri_threshold=0.30, debug=True,
                  quality_gate_enabled=True, track_identity_mgr=None,
-                 abs_floor_fullface=None, abs_floor_periocular=None):
-        from config import GATE_ABS_FLOOR_FULLFACE, GATE_ABS_FLOOR_PERIOCULAR
+                 abs_floor_fullface=None, abs_floor_periocular=None,
+                 peri_vote_floor=None):
+        from config import GATE_ABS_FLOOR_FULLFACE, GATE_ABS_FLOOR_PERIOCULAR, GATE_PERIOCULAR_VOTE_FLOOR
         self.known = known_encodings
         self.every_n = match_every_n
         self.thresh = threshold
@@ -519,6 +557,7 @@ class FaceIdentifier:
         # Dual-criterion: absolute cosine similarity floors (open-set rejection)
         self.abs_floor_full = abs_floor_fullface if abs_floor_fullface is not None else GATE_ABS_FLOOR_FULLFACE
         self.abs_floor_peri = abs_floor_periocular if abs_floor_periocular is not None else GATE_ABS_FLOOR_PERIOCULAR
+        self.peri_vote_floor = peri_vote_floor if peri_vote_floor is not None else GATE_PERIOCULAR_VOTE_FLOOR
         # { track_id: (name_or_None, frame_last_checked, match_type) }
         # match_type: "full" | "periocular" | None
         self.cache = {}
@@ -629,9 +668,12 @@ class FaceIdentifier:
 
             # Log when we are working from a synthetic (dummy) face estimate
             is_synthetic = getattr(face_obj, '_synthetic', False)
-            if is_synthetic and self.debug:
-                print(f"  [face_id] track {track_id}: [SYNTHETIC FACE — mask inferred "
-                      f"from bbox, no real landmarks detected]")
+            if is_synthetic:
+                if self.debug:
+                    print(f"  [face_id] track {track_id}: [SYNTHETIC FACE — mask inferred "
+                          f"from bbox, no real landmarks detected] → REJECTED as unresolved")
+                self.cache[track_id] = (cached_name, frame_idx, None)
+                return cached_name
 
             # ── Stage 7: Quality gate ──────────────────────────────────
             # Run BEFORE embedding comparison. If quality gate rejects,
@@ -652,7 +694,7 @@ class FaceIdentifier:
                 else:
                     face_crop = crop
 
-                quality_result = assess_quality(face_crop, face_obj)
+                quality_result = assess_quality(face_crop, face_obj, frame_w=crop.shape[1], frame_h=crop.shape[0])
 
                 # Record for audit trail
                 if self._track_mgr:
@@ -685,7 +727,7 @@ class FaceIdentifier:
             quality_score = quality_result.score if quality_result else 0.5
 
             # Check if face appears masked
-            masked = _is_masked(face_obj)
+            masked = _is_masked(face_obj, crop_rgb)
             if masked:
                 self.stats["masked_detected"] += 1
                 if self.debug:
@@ -713,8 +755,8 @@ class FaceIdentifier:
                     # Neighborhood Aware Cosine (NAC)
                     if len(full_scores) > 1:
                         second_best_score = full_scores[1][1]
-                        # Penalize ambiguous matches
-                        nac_score = best_score - (0.5 * second_best_score)
+                        # Penalize ambiguous matches (true margin)
+                        nac_score = best_score - second_best_score
                         if self.debug:
                             print(f"  [face_id] track {track_id}: FULL-FACE NAC raw={best_score:.3f}, "
                                   f"nearest={second_best_score:.3f} -> NAC={nac_score:.3f}")
@@ -796,7 +838,7 @@ class FaceIdentifier:
                         # Neighborhood Aware Cosine (NAC)
                         if len(peri_scores) > 1:
                             second_best_score = peri_scores[1][1]
-                            nac_score = peri_best_score - (0.5 * second_best_score)
+                            nac_score = peri_best_score - second_best_score
                             if self.debug:
                                 print(f"  [face_id] track {track_id}: PERIOCULAR NAC raw={peri_best_score:.3f}, "
                                       f"nearest={second_best_score:.3f} -> NAC={nac_score:.3f}")
@@ -811,7 +853,7 @@ class FaceIdentifier:
                         # Temporal aggregation: require at least 2 scores >= threshold for the SAME person
                         recent_matches = [
                             n for n, s in self.peri_history[track_id]
-                            if s >= self.peri_thresh
+                            if s >= self.peri_vote_floor
                         ]
 
                         import collections
@@ -856,7 +898,7 @@ class FaceIdentifier:
                                 total_ms = (time.perf_counter() - _start_time) * 1000
                                 if self.debug:
                                     print(f"  [face_id] track {track_id}: PERIOCULAR MATCH → "
-                                          f"{matched_person} (aggregated >=2 matches above {self.peri_thresh}) "
+                                          f"{matched_person} (aggregated >=2 matches above {self.peri_vote_floor}) "
                                           f"raw={raw_peri_best:.3f} (floor={self.abs_floor_peri:.2f}) "
                                           f"⚠ LOWER CONFIDENCE than full-face")
                                     print(f"  [face_id] identify_person latency: {total_ms:.1f}ms")

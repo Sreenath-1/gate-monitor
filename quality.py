@@ -92,7 +92,7 @@ def _estimate_pose(landmarks_2d: np.ndarray, img_w: int, img_h: int):
     try:
         success, rvec, tvec = cv2.solvePnP(
             _MODEL_POINTS_5, pts_2d, camera_matrix, dist_coeffs,
-            flags=cv2.SOLVEPNP_ITERATIVE
+            flags=cv2.SOLVEPNP_SQPNP
         )
         if not success:
             return 0.0, 0.0, 0.0
@@ -150,7 +150,9 @@ def assess_quality(face_crop_bgr: np.ndarray,
                    max_yaw: int = None,
                    max_pitch: int = None,
                    min_brightness: int = None,
-                   max_brightness: int = None) -> QualityResult:
+                   max_brightness: int = None,
+                   frame_w: int = None,
+                   frame_h: int = None) -> QualityResult:
     """Assess face quality for recognition suitability.
 
     Runs lightweight CPU checks in order of computational cost.
@@ -166,6 +168,8 @@ def assess_quality(face_crop_bgr: np.ndarray,
         max_pitch: Override for MAX_PITCH_DEG config.
         min_brightness: Override for MIN_BRIGHTNESS config.
         max_brightness: Override for MAX_BRIGHTNESS config.
+        frame_w: Width of the coordinate space that face_obj.kps is in.
+        frame_h: Height of the coordinate space that face_obj.kps is in.
 
     Returns:
         QualityResult with pass/fail verdict, combined score, and reason code.
@@ -200,7 +204,9 @@ def assess_quality(face_crop_bgr: np.ndarray,
     # ── Check 3: Pose angle ─────────────────────────────────────────────
     yaw, pitch = 0.0, 0.0
     if face_obj is not None and hasattr(face_obj, 'kps') and face_obj.kps is not None:
-        yaw, pitch, _ = _estimate_pose(face_obj.kps, w, h)
+        pose_w = frame_w if frame_w is not None else w
+        pose_h = frame_h if frame_h is not None else h
+        yaw, pitch, _ = _estimate_pose(face_obj.kps, pose_w, pose_h)
         if abs(yaw) > _max_yaw or abs(pitch) > _max_pitch:
             return QualityResult(
                 passed=False, score=0.0, reason="BAD_ANGLE",

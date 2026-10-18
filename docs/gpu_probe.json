@@ -1,0 +1,50 @@
+{
+  "system": {
+    "python_version": "3.11.9",
+    "python_path": "C:\\cctv scan\\Video_Models\\gate_monitor\\.venv-gpu\\Scripts\\python.exe",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "cpu": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "ram_total_mb": 16072,
+    "ram_available_mb": 4098,
+    "battery": {
+      "percent": 99,
+      "plugged_in": true
+    },
+    "disk_total_gb": 475.4,
+    "disk_free_gb": 276.8
+  },
+  "nvidia_smi": {
+    "gpu_name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "vram_total_mb": 6141,
+    "vram_free_mb": 5921,
+    "driver_version": "576.93",
+    "gpu_temp_c": 48,
+    "power_draw_w": 2.43,
+    "power_limit_w": null,
+    "gpu_clock_mhz": 210,
+    "mem_clock_mhz": 405,
+    "throttle_reasons": "0x0000000000000001"
+  },
+  "torch": {
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cuda_version": "12.4",
+    "cudnn_version": "90100",
+    "device_name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "device_count": 1,
+    "vram_total_mb": 6140,
+    "cuda_alloc_test": "PASS"
+  },
+  "onnxruntime": {
+    "ort_version": "1.21.1",
+    "available_providers": [
+      "TensorrtExecutionProvider",
+      "CUDAExecutionProvider",
+      "CPUExecutionProvider"
+    ],
+    "has_cuda_ep": true,
+    "has_dml_ep": false,
+    "cuda_ep_status": "available"
+  },
+  "all_ok": true
+}

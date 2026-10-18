@@ -43,6 +43,10 @@ from itertools import combinations
 
 import numpy as np
 
+# Force UTF-8 output on Windows (cp1252 can't encode ⚠, ✓, ✗ etc.)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -377,21 +381,23 @@ def run_calibration(known_faces_dir: str = "known_faces"):
     else:
         print(f"  Impostor (diff person): n=0")
 
-    full_thresh, full_gap, full_sep = _suggest_threshold(full_intra, full_inter)
-    if full_thresh is not None:
-        sep_note = "✓ clean gap" if full_sep else f"⚠ distributions OVERLAP by {abs(full_gap):.3f}"
-        # HARDENING: clamp calibrated threshold to never go below absolute floor
-        if full_thresh < GATE_ABS_FLOOR_FULLFACE:
-            print(f"\n  ⚠ Raw calibrated threshold ({full_thresh}) is BELOW absolute floor "
-                  f"({GATE_ABS_FLOOR_FULLFACE})")
-            print(f"  Clamping to absolute floor. A tiny gallery cannot override "
-                  f"the open-set safety floor.")
-            full_thresh = GATE_ABS_FLOOR_FULLFACE
-        print(f"\n  Suggested GATE_FACE_THRESHOLD = {full_thresh}  ({sep_note})")
-        if not full_sep:
-            print(f"  (Distributions overlap — any threshold will have both false accepts and rejects)")
+    full_thresh_nac = None
+    full_thresh = None
+    if n_people < 5:
+        print(f"\n  ⚠ FULL-FACE THRESHOLD REFUSED: insufficient gallery diversity "
+              f"({n_people} < 5 people)")
+        print(f"  Cannot calibrate full-face open-set rejection with this gallery size.")
+        print(f"  Using safe default margin (GATE_FACE_VOTE_FLOOR = 0.15) instead.")
+        print(f"  Enroll ≥5 distinct people to enable full-face threshold calibration.")
     else:
-        print(f"\n  Could not compute threshold (insufficient data)")
+        full_thresh, full_gap, full_sep = _suggest_threshold(full_intra, full_inter)
+        if full_thresh is not None:
+            sep_note = "✓ clean gap" if full_sep else f"⚠ distributions OVERLAP by {abs(full_gap):.3f}"
+            print(f"\n  Suggested raw calibrated threshold = {full_thresh}  ({sep_note})")
+            if not full_sep:
+                print(f"  (Distributions overlap — any threshold will have both false accepts and rejects)")
+        else:
+            print(f"\n  Could not compute threshold (insufficient data)")
 
     print(f"\n{'='*60}")
     print(f"  PERIOCULAR EMBEDDING SCORES  (raw cosine, not NAC)")
@@ -481,23 +487,18 @@ def run_calibration(known_faces_dir: str = "known_faces"):
     # The pipeline uses NAC = score - 0.5 * nearest_other_score.
     # Simulate what NAC does to the thresholds.
     full_thresh_nac = None
-    if full_inter and full_intra and full_thresh is not None:
+    if full_inter and full_intra and full_thresh is not None and n_people >= 5:
         avg_impostor = float(np.mean(full_inter))
-        full_thresh_nac  = round(full_thresh  - 0.5 * avg_impostor, 3)
-        # Clamp NAC-adjusted threshold too
-        if full_thresh_nac < GATE_ABS_FLOOR_FULLFACE:
-            full_thresh_nac = GATE_ABS_FLOOR_FULLFACE
+        full_thresh_nac  = round(full_thresh  - avg_impostor, 3)
 
     if peri_inter and peri_intra and peri_thresh is not None:
         avg_impostor_peri = float(np.mean(peri_inter))
-        peri_thresh_nac  = round(peri_thresh  - 0.5 * avg_impostor_peri, 3)
-        if peri_thresh_nac < GATE_ABS_FLOOR_PERIOCULAR:
-            peri_thresh_nac = GATE_ABS_FLOOR_PERIOCULAR
+        peri_thresh_nac  = round(peri_thresh  - avg_impostor_peri, 3)
 
     if full_thresh_nac is not None or peri_thresh_nac is not None:
         print(f"\n{'='*60}")
         print(f"  NAC-ADJUSTED THRESHOLDS  (what face_id.py actually compares)")
-        print(f"  (NAC = raw_score - 0.5 × nearest_impostor_score)")
+        print(f"  (NAC = raw_score - nearest_impostor_score)")
         print(f"{'='*60}")
         if full_thresh_nac is not None:
             print(f"  GATE_FACE_THRESHOLD        = {full_thresh_nac}")

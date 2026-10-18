@@ -201,7 +201,7 @@ def test_nac_pass_but_abs_floor_fail():
     second_name, second_raw = sorted_scores[1]
 
     # NAC score
-    nac = best_raw - 0.5 * second_raw
+    nac = best_raw - second_raw
 
     # The NAC might well be positive (especially with only 2 people),
     # but the raw sim MUST be below the absolute floor
@@ -240,13 +240,41 @@ def test_genuine_match_still_works():
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     best_name, best_raw = sorted_scores[0]
     second_raw = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
-    nac = best_raw - 0.5 * second_raw
+    nac = best_raw - second_raw
 
     assert best_name == names[0], (
         f"Genuine probe matched {best_name} instead of {names[0]}"
     )
     print(f"    Genuine probe: raw={best_raw:.3f} NAC={nac:.3f} -> "
           f"correctly matchable (both criteria pass)")
+
+
+def test_cross_match_enrolled():
+    """
+    Test that a probe highly similar to Person B does NOT get accepted as Person A,
+    and a probe that is ambiguous between A and B gets rejected or flagged by NAC.
+    """
+    gallery = _build_mock_gallery(2)
+    names = list(gallery.keys())
+
+    base_a = gallery[names[0]]["full"]
+    base_b = gallery[names[1]]["full"]
+
+    # Probe that is 0.7 similar to A and 0.65 similar to B
+    probe = 0.7 * base_a + 0.65 * base_b
+    probe = probe / np.linalg.norm(probe)
+
+    sim_a = float(np.dot(probe, base_a))
+    sim_b = float(np.dot(probe, base_b))
+    
+    # Calculate NAC relative to best match
+    best_sim, second_sim = (sim_a, sim_b) if sim_a > sim_b else (sim_b, sim_a)
+    nac = best_sim - second_sim
+
+    print(f"    Ambiguous probe: sim_a={sim_a:.3f}, sim_b={sim_b:.3f}, NAC={nac:.3f}")
+    assert nac < GATE_FACE_THRESHOLD or best_sim < GATE_ABS_FLOOR_FULLFACE, (
+        f"Probe dangerously ambiguous (NAC={nac:.3f}) but passed threshold {GATE_FACE_THRESHOLD}!"
+    )
 
 
 def test_periocular_abs_floor():
@@ -323,7 +351,7 @@ def test_dual_criterion_both_must_pass():
     midpoint = midpoint / np.linalg.norm(midpoint)
     sim_a = float(np.dot(midpoint, base_a))
     sim_b = float(np.dot(midpoint, base_b))
-    nac = sim_a - 0.5 * sim_b  # Will be low because sim_a ≈ sim_b
+    nac = sim_a - sim_b  # Will be low because sim_a ≈ sim_b
 
     # This is ambiguous — the system should flag it as uncertain or reject
     print(f"    Midpoint probe: sim_a={sim_a:.3f}, sim_b={sim_b:.3f}, NAC={nac:.3f}")
@@ -492,6 +520,7 @@ test("Periocular absolute floor enforced", test_periocular_abs_floor)
 test("50 bulk unknown embeddings all rejected", test_all_unknowns_rejected_bulk)
 test("Dual-criterion: both NAC and abs_floor must pass",
      test_dual_criterion_both_must_pass)
+test("Cross-match enrolled (ambiguous probe) rejected", test_cross_match_enrolled)
 
 # Group 2: Integration tests
 test("FaceIdentifier has abs_floor attributes", test_identifier_rejects_unknowns)
